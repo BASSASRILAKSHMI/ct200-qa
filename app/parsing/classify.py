@@ -75,7 +75,8 @@ def learn_layout(lines: list[Line]) -> Layout:
     first_page = [l for l in lines if l.page == min(x.page for x in lines)]
     title_size = max((l.size for l in first_page), default=size)
     rights = sorted(l.x1 for l in body if abs(l.x0 - margin) <= MARGIN_TOL)
-    right = rights[int(0.9 * (len(rights) - 1))] if rights else margin + 300  # 90th percentile, robust
+    # 90th percentile: ignores the odd overlong line, and rounds up so tiny inputs use the max
+    right = rights[round(0.9 * (len(rights) - 1))] if rights else margin + 300
     return Layout(margin_x=float(margin), body_size=size, title_size=title_size, right_x=right)
 
 
@@ -129,10 +130,23 @@ def classify(items: list[Union[Line, Table]], lines: list[Line]) -> tuple[list[E
         line: Line = it
 
         # ---- document title (multi-line, page 1, largest font) -------------
-        if not title_done and line.page == 1 and line.size >= lay.title_size - 0.5 and lay.title_size > lay.body_size + 2:
+        # A numbered heading is never the title: without this, a document with no separate
+        # title page loses its first chapter into the root (found by a synthetic test).
+        if (
+            not title_done
+            and line.page == 1
+            and line.size >= lay.title_size - 0.5
+            and lay.title_size > lay.body_size + 2
+            and not _is_heading(line, lay)
+        ):
             ids, parts = [line.id], [line.text]
             j = i + 1
-            while j < len(items) and isinstance(items[j], Line) and items[j].size >= lay.title_size - 0.5:
+            while (
+                j < len(items)
+                and isinstance(items[j], Line)
+                and items[j].size >= lay.title_size - 0.5
+                and not _is_heading(items[j], lay)
+            ):
                 ids.append(items[j].id)
                 parts.append(items[j].text)
                 j += 1
