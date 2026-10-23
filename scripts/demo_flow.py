@@ -5,7 +5,8 @@
 
 Flow: upload v1 -> select 3.2 + 4.2 from v1 -> generate test cases (LLM) -> submit again
 (stored result reused, no LLM call) -> upload v2 -> show that the selection still resolves
-to v1 text, that both sections changed, and exactly what changed.
+to v1 text, exactly what changed, which generated test cases are now stale (and how badly),
+and that they can be found from the v2 node.
 Without GROQ_API_KEY in .env the generation step reports the configuration error and the
 rest of the flow still runs.
 Each run uses its own document name, so it can be repeated without resetting the database.
@@ -72,7 +73,8 @@ def main() -> None:
         step("3. Generate QA test cases from the pinned v1 text (LLM)")
         r = c.post(f"/selections/{sel['id']}/generate")
         gen = r.json()
-        if r.status_code == 201:
+        generated = r.status_code == 201          # used again in steps 4 and 8
+        if generated:
             print(f"  generation {gen['id'][:12]}… by {gen['provider']}/{gen['model']}, "
                   f"{len(gen['attempts'])} attempt(s)")
             for a in gen["attempts"]:
@@ -92,7 +94,7 @@ def main() -> None:
 
         step("4. Submit the same selection again: duplicate policy")
         r2 = c.post(f"/selections/{sel['id']}/generate")
-        if r.status_code == 201:
+        if generated:
             print(f"  HTTP {r2.status_code}, reused={r2.json()['reused']}, same id: {r2.json()['id'] == gen['id']} "
                   "(stored result returned, LLM not called)")
         else:
@@ -121,7 +123,29 @@ def main() -> None:
             for ch in d["changes"]:
                 print(f"    {ch['op']:8} '{ch['old'][:50]}' -> '{ch['new'][:70]}'")
 
-        step("8. Re-uploading v2 is a no-op")
+        step("8. Are the test cases generated from v1 still valid? (staleness, computed now)")
+        if generated:
+            gens = check(c.get(f"/selections/{sel['id']}/generations"), 200)
+            st = gens[0]["staleness"]
+            print(f"  generation {gens[0]['id'][:12]}…: {st['status'].upper()} (severity {st['severity']})")
+            print(f"  {st['summary']}")
+            for tc in st["test_cases"]:
+                print(f"  {tc['id']} {tc['status']:7} {tc['severity']:6} {tc['title'][:60]}")
+                for reason in tc["reasons"]:
+                    print(f"        - {reason}")
+
+            step("9. Look up test cases from the CURRENT (v2) node of 3.2")
+            v2_32 = find(c, "3.2", 2, doc)
+            hits = check(c.get(f"/nodes/{v2_32}/generations"), 200)
+            for g in hits:
+                print(f"  generation {g['id'][:12]}… (made from v{g['pinned_version']}) "
+                      f"cites this section in {g['node_test_case_ids']}; status {g['staleness']['status']}")
+            stale_only = check(c.get(f"/selections/{sel['id']}/generations", params={"status": "stale"}), 200)
+            print(f"  ?status=stale filter returns {len(stale_only)} generation(s)")
+        else:
+            print("  skipped: no successful generation in step 3 (set GROQ_API_KEY in .env)")
+
+        step("10. Re-uploading v2 is a no-op")
         with open(V2, "rb") as f:
             r = c.post("/documents/ingest", files={"file": ("ct200_manual_v2.pdf", f, "application/pdf")},
                        params={"document": doc})
