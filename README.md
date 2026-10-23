@@ -15,7 +15,7 @@ serious any change is.
 * Staleness is per test case: **stale / review / current**, with severity **high** when a value it
   depends on changed (e.g. `40 → 30 mmHg`, `2 → 1.5 s`).
 
-**Design and decisions:** [docs/APPROACH.md](docs/APPROACH.md) (includes the decision log).
+**Design and decisions:** [docs/APPROACH.md](docs/APPROACH.md) (includes the decision log; PDF copy: [docs/APPROACH.pdf](docs/APPROACH.pdf)).
 
 ## Setup
 
