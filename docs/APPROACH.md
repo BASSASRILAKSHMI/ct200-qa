@@ -24,7 +24,7 @@ inline: [pdf_findings.md](pdf_findings.md), [versioning.md](versioning.md),
 ```
 
 All seven requested parts are implemented: ingestion and tree, versioning, browse API, selection
-API, LLM generation, staleness, and retrieval. There are 125 automated tests, run on Python 3.10
+API, LLM generation, staleness, and retrieval. There are 128 automated tests, run on Python 3.10
 and 3.13 and on PyMuPDF 1.26–2.0. `scripts/demo_flow.py` runs the full v1 → selection → generate →
 v2 → staleness flow against the live API.
 
@@ -108,6 +108,7 @@ parser code. Each one has a test in `tests/test_parser_ct200.py`.
 | 9 | ligatures (`ﬁ`, `ﬀ`) and U+2011 hyphens split into separate spans | normalised for display and hashing |
 | 10 | section numbers inside sentences ("see 2.1, 4.3") | headings must start a bold line at the margin |
 | 11 | three-line document title | merged into the root node |
+| 12 | figures/images: **none** in either PDF (0 image blocks; the vector drawings are table borders) | not applicable here, but an image is never skipped silently: it becomes a `figure` block in its section, a "Figure N…" line just below becomes its caption, it counts toward the section hash, and it is reported as a parse warning (tested on a generated PDF) |
 
 ### 3.4 What the first implementation got wrong, and how each was found
 
@@ -238,6 +239,7 @@ all four. Limits are listed in [staleness.md](staleness.md).
 | demo crashed at the staleness step (variable reused) | running the demo end to end | separate variable |
 | real Groq test asserted "220, 260, then 300 mmHg" (manual max 299) | reading the first real output | `unverified_values` warning |
 | concurrent uploads gave a raw HTTP 500 | testing the decision-log claim with two threads | HTTP 409; test proven to fail on the old code |
+| images would have been skipped without a trace | final cross-check against the assignment's list (figures and captions) | figure blocks with captions + warning |
 
 ## 9. Decision log
 

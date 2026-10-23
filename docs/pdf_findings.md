@@ -143,6 +143,13 @@ The cross-check shows what OCR would have introduced on this document:
 Every one of these would make an unchanged section look "changed" between versions, and the
 `±3` -> `+3` case silently corrupts a medical accuracy specification.
 
+## 12. Figures
+
+Neither PDF contains images (0 image blocks; 170 / 204 vector drawings are table borders), so
+no figure or caption needs extracting. The parser still handles them so nothing can be dropped
+silently: a placed image becomes a `figure` block in its section, a "Figure N…" line directly
+below it becomes the caption, and each figure is reported as a parse warning.
+
 ## v1 -> v2 content differences (seen during inspection; used later for versioning)
 
 | Section | Change |

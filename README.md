@@ -103,7 +103,7 @@ python scripts/show_history.py 3.2          # every version of 3.2 with a word d
 ## Tests
 
 ```bash
-python -m pytest -q          # 125 tests, ~15 s, no network or API key needed
+python -m pytest -q          # 128 tests, ~15 s, no network or API key needed
 ```
 
 The LLM is replaced by a scripted test double, the generation store by an in-memory store and
@@ -113,7 +113,7 @@ Python 3.10 and 3.13, PyMuPDF 1.26–2.0.
 | Area | File |
 |---|---|
 | every PDF irregularity, word coverage, hash stability | `tests/test_parser_ct200.py` |
-| parser edge cases not in the PDF | `tests/test_parser_synthetic.py` |
+| parser edge cases not in the PDF, figures and captions | `tests/test_parser_synthetic.py`, `tests/test_parser_figures.py` |
 | version matcher, including refusal cases | `tests/test_matcher.py` |
 | ingestion, idempotency, revert, concurrent uploads | `tests/test_ingestion.py` |
 | browse and selection API | `tests/test_api.py` |
@@ -156,7 +156,7 @@ app/
   staleness/   per-test-case staleness against the latest version
   api/         FastAPI routes, schemas, converters;  app/main.py wires them up
 scripts/       inspect_pdf, parse_cli, ocr_crosscheck, ingest, show_history, check_setup, demo_flow
-tests/         125 tests
+tests/         128 tests
 data/          ct200_manual.pdf (v1), ct200_manual_v2.pdf (v2)
 docs/          APPROACH.md, pdf_findings.md, versioning.md, llm_generation.md, staleness.md
 ```
