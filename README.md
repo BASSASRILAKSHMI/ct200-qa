@@ -5,7 +5,8 @@ generates QA test-case ideas from selected sections with an LLM, and detects whe
 test cases go stale after the manual changes.
 
 > Built in stages. Done: Stage 1 (PDF parsing), Stage 2 (database and versioning),
-> Stage 3 (browse and selection API), Stage 4 (LLM test-case generation). Next: staleness.
+> Stage 3 (browse and selection API), Stage 4 (LLM test-case generation),
+> Stage 5 (staleness and retrieval).
 
 ## Setup
 
@@ -146,6 +147,25 @@ policies: [docs/llm_generation.md](docs/llm_generation.md).
 The test suite never calls a real LLM or MongoDB: it uses a scripted LLM, an in-memory store and
 `mongomock`, so `pytest` needs no keys or network.
 
+## Stage 5: staleness and retrieval
+
+Every response that contains a generation now includes `staleness` (computed at request time
+against the latest version) and, on each test case, `stale_status` / `stale_severity`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/generations/{id}` | one generation with its live verdict |
+| GET | `/selections/{id}/generations?status=` | by selection; filter `current` / `review` / `stale` |
+| GET | `/nodes/{id}/generations?exact_version=&status=` | by section, across versions (the v2 node finds v1 test cases) |
+
+Verdict per test case: **stale** if its quoted requirement is no longer in the current text,
+**review** if the section changed elsewhere, **current** if nothing it cites changed. Severity
+is **high** when a value it depends on changed (40 → 30 mmHg, 2 → 1.5 s), **medium** for wording,
+**low** for unrelated edits. Design and limits: [docs/staleness.md](docs/staleness.md).
+
+`python scripts/demo_flow.py` runs the whole flow and ends with the staleness of the v1 test
+cases after v2 is ingested.
+
 ## Layout
 
 ```
@@ -156,6 +176,7 @@ app/services/    ingestion, queries, selections (no HTTP code)
 app/llm/         LLM client (OpenAI-compatible, Groq default) + scripted test double
 app/generation/  prompt, reply validation, generation service
 app/storage/     generation store: MongoDB, JSON files, in-memory
+app/staleness/   per-test-case staleness against the latest version
 app/api/         FastAPI routes, schemas, converters; app/main.py wires them up
 scripts/         inspect_pdf, parse_cli, ocr_crosscheck, ingest, show_history, demo_flow, check_setup
 tests/           real-PDF tests + synthetic edge-case tests
