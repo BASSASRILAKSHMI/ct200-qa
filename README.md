@@ -1,185 +1,161 @@
 # CT-200 QA Traceability Backend
 
-Turns the CardioTrack CT-200 manual (PDF) into a structured, versioned document tree,
-generates QA test-case ideas from selected sections with an LLM, and detects when those
-test cases go stale after the manual changes.
+A FastAPI backend that turns the CardioTrack CT-200 manual (PDF) into a **versioned section
+tree**, generates **QA test-case ideas** from selected sections with an LLM, and tells you, when
+you fetch those test cases later, **whether they still match the current manual** and how
+serious any change is.
 
-> Built in stages. Done: Stage 1 (PDF parsing), Stage 2 (database and versioning),
-> Stage 3 (browse and selection API), Stage 4 (LLM test-case generation),
-> Stage 5 (staleness and retrieval).
+* Parses the PDF's real structure, including its traps (a skipped level, out-of-order sections,
+  a numbered list that looks like chapters, duplicate titles, page-split paragraphs, tables).
+* Re-ingesting v2 keeps v1 intact; unchanged sections are recognised as the same logical section,
+  changed ones are flagged with a word diff.
+* Selections are pinned to exact section versions.
+* LLM output is validated strictly (schema, cited sections, verbatim quotes) with feedback
+  retries; failures are stored, never half-accepted; duplicate submissions reuse results.
+* Staleness is per test case: **stale / review / current**, with severity **high** when a value it
+  depends on changed (e.g. `40 → 30 mmHg`, `2 → 1.5 s`).
+
+**Design and decisions:** [docs/APPROACH.md](docs/APPROACH.md) (includes the decision log).
 
 ## Setup
 
-Requires Python 3.10+ and, for the OCR fallback/cross-check only, the Tesseract binary
-(`sudo apt install tesseract-ocr`, or the Windows installer from UB Mannheim).
+Requires **Python 3.10+**. Tesseract is optional (only for the OCR fallback and cross-check).
 
 ```bash
+git clone https://github.com/BASSASRILAKSHMI/ct200-qa.git
+cd ct200-qa
 python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+source .venv/bin/activate              # Windows PowerShell: .venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env                   # Windows: copy .env.example .env
 ```
 
-## Stage 1: PDF parsing
+### Environment variables (`.env`)
 
-```bash
-# raw layout dump (fonts, sizes, positions) - how every parsing rule was discovered
-python scripts/inspect_pdf.py data/ct200_manual.pdf
-
-# parsed tree with flags and content hashes
-python scripts/parse_cli.py data/ct200_manual.pdf
-python scripts/parse_cli.py data/ct200_manual_v2.pdf --json out/v2.json
-
-# independent OCR parse compared against the text-layer parse (~30 s)
-python scripts/ocr_crosscheck.py data/ct200_manual.pdf
-
-# tests
-python -m pytest -q
-```
-
-Pipeline: `extract` (text layer, OCR fallback, table geometry) -> `classify` (title, headings,
-paragraphs, lists, tables) -> `build_tree` (numbering-based parents, irregularity flags) ->
-coverage check. Details and every irregularity found: [docs/pdf_findings.md](docs/pdf_findings.md).
-
-## Stage 2: versions in SQLite (v1 -> v2 re-ingestion)
-
-```bash
-# ingest v1, then v2 as version 2 of the same document (--reset starts from an empty DB)
-python scripts/ingest.py data/ct200_manual.pdf data/ct200_manual_v2.pdf --reset
-
-# or one at a time, which is what a real update looks like
-python scripts/ingest.py data/ct200_manual.pdf
-python scripts/ingest.py data/ct200_manual_v2.pdf
-
-# history of one section across versions, with a word diff and changed numbers
-python scripts/show_history.py 3.2
-python scripts/show_history.py "Error Codes"
-```
-
-Expected v1 -> v2 result: 24 unchanged, 4 modified (2.1.1.1, 3.2, 4.2, 4.3), 1 added (5.3).
-Re-running the v2 ingest is a no-op. The database is `ct200.db` (set `DATABASE_URL` to change).
-Matching strategy and its failure modes: [docs/versioning.md](docs/versioning.md).
-
-## Stage 3: the API
-
-```bash
-uvicorn app.main:app --reload
-```
-
-Open **http://127.0.0.1:8000/docs** for interactive Swagger UI (every endpoint can be tried
-from the browser). Then, in a second terminal, the scripted end-to-end flow:
-
-```bash
-python scripts/demo_flow.py
-```
-
-It uploads v1, pins a selection of 3.2 + 4.2, uploads v2, and shows that the selection still
-resolves to v1 text, that both sections changed, and exactly what changed (`40 -> 30` mmHg,
-`2 -> 1.5` seconds, `E6` added). Each run uses its own document name, so it is repeatable.
-
-| Method | Path | Purpose |
+| Variable | Default | Purpose |
 |---|---|---|
-| POST | `/documents/ingest` | upload a PDF as the next version (201 new, 200 identical, 422 incomplete parse) |
-| GET | `/documents/versions`, `/documents/versions/{n}` | versions with diff summary and parse warnings |
-| GET | `/sections?version=` | top-level sections (latest by default) |
-| GET | `/tree?version=` | whole heading tree |
-| GET | `/nodes/{id}` | node with full text, blocks, hash, flags, parent, path, children |
-| GET | `/nodes/{id}/changes` | changed since this version? history + word diff to latest |
-| GET | `/search?q=&field=&flag=&version=` | search titles/text, filter by flag (e.g. `duplicate_title`) |
-| POST | `/selections` | named, version-pinned selection (`include_descendants` for chapters) |
-| GET | `/selections`, `/selections/{id}` | selections with pinned text and status in latest version |
+| `GROQ_API_KEY` | (none) | LLM key from https://console.groq.com (needed only for generation) |
+| `LLM_MODEL` | `openai/gpt-oss-120b` | any model your key can use |
+| `LLM_BASE_URL` | `https://api.groq.com/openai/v1` | any OpenAI-compatible endpoint |
+| `LLM_TEMPERATURE` | `0.2` | |
+| `LLM_MAX_CONTENT_ATTEMPTS` | `3` | replies the validator may reject before a generation is stored as failed |
+| `LLM_MAX_TRANSPORT_RETRIES` | `3` | retries for 429 / 5xx / timeouts |
+| `MONGODB_URI` | (empty) | MongoDB/Atlas connection string; **empty = JSON files** in `./generation_store` |
+| `MONGODB_DB` | `ct200_qa` | |
+| `DATABASE_URL` | `sqlite:///./ct200.db` | tree, versions, selections |
 
-All browse endpoints also take `document=` (default `CT-200 Manual`).
-
-IDs: a **node id** identifies one section *in one version* and never changes meaning; the
-**logical_node_id** is shared by that section across versions.
-
-curl examples (on Windows PowerShell type `curl.exe`, not `curl`):
-
-```bash
-curl -F "file=@data/ct200_manual.pdf" http://127.0.0.1:8000/documents/ingest
-curl -F "file=@data/ct200_manual_v2.pdf" http://127.0.0.1:8000/documents/ingest
-curl "http://127.0.0.1:8000/sections?version=1"
-curl "http://127.0.0.1:8000/search?q=error%20codes&field=title"
-curl "http://127.0.0.1:8000/search?flag=out_of_order"
-curl http://127.0.0.1:8000/nodes/11/changes
-curl -H "Content-Type: application/json" -d "{\"name\":\"inflation\",\"node_ids\":[11,16]}" http://127.0.0.1:8000/selections
-```
-
-Selection rules: all nodes from one version (422 otherwise), unknown ids 404, name reused 409,
-order normalised to document order, duplicates collapsed.
-
-## Stage 4: LLM test-case generation
-
-### Configure (once)
-
-```bash
-cp .env.example .env          # Windows: copy .env.example .env
-```
-
-Edit `.env`:
-* `GROQ_API_KEY=` your key from https://console.groq.com (API Keys)
-* `MONGODB_URI=` your Atlas connection string (Connect → Drivers), or leave empty to store
-  results as JSON files in `./generation_store`
-
-`.env` is git-ignored. Then check it:
+`.env` is git-ignored. Check it (prints no secrets, lists usable models if one is refused):
 
 ```bash
 python scripts/check_setup.py
 ```
 
-### Use
+## Run
 
 ```bash
 uvicorn app.main:app --reload
-python scripts/demo_flow.py          # now also generates, and shows the duplicate policy
 ```
 
+Interactive API docs: **http://127.0.0.1:8000/docs**
+
+## The v1 → v2 re-ingestion flow
+
+**Scripted, end to end** (server running, second terminal):
+
+```bash
+python scripts/demo_flow.py
+```
+
+It uploads v1, pins a selection of 3.2 + 4.2, generates test cases, submits again (reused, no LLM
+call), uploads v2, then shows: the selection still resolves to v1 text, exactly what changed
+(`40 → 30` mmHg, `2 → 1.5` s, `E6` added), which generated test cases are now stale and why, and
+that they can be found from the v2 node. Each run uses its own document name, so it is repeatable.
+Without `GROQ_API_KEY` the generation step reports the configuration error and the rest still runs.
+
+**By hand with curl** (PowerShell: type `curl.exe`):
+
+```bash
+# 1. ingest v1, then v2 as version 2 of the same document
+curl -F "file=@data/ct200_manual.pdf"    http://127.0.0.1:8000/documents/ingest
+curl -F "file=@data/ct200_manual_v2.pdf" http://127.0.0.1:8000/documents/ingest
+#    -> 201 with diff_summary: unchanged 24, modified [2.1.1.1, 3.2, 4.2, 4.3], added [5.3]
+#    re-uploading the same file -> 200, created=false
+
+# 2. find v1's section 3.2 and see what changed
+curl "http://127.0.0.1:8000/search?q=3.2&field=title&version=1"     # note its id, e.g. 11
+curl  http://127.0.0.1:8000/nodes/11/changes
+
+# 3. pin a selection, generate, check staleness
+curl -H "Content-Type: application/json" -d "{\"name\":\"inflation\",\"node_ids\":[11]}" http://127.0.0.1:8000/selections
+curl -X POST http://127.0.0.1:8000/selections/1/generate
+curl "http://127.0.0.1:8000/selections/1/generations"               # staleness block per generation
+```
+
+To see staleness appear, generate from v1 **before** ingesting v2 (as the demo does). Or use the
+command-line tools:
+
+```bash
+python scripts/ingest.py data/ct200_manual.pdf data/ct200_manual_v2.pdf --reset
+python scripts/show_history.py 3.2          # every version of 3.2 with a word diff
+```
+
+## Tests
+
+```bash
+python -m pytest -q          # 125 tests, ~15 s, no network or API key needed
+```
+
+The LLM is replaced by a scripted test double, the generation store by an in-memory store and
+`mongomock`, so tests are deterministic and never touch your `.env` services. Verified on
+Python 3.10 and 3.13, PyMuPDF 1.26–2.0.
+
+| Area | File |
+|---|---|
+| every PDF irregularity, word coverage, hash stability | `tests/test_parser_ct200.py` |
+| parser edge cases not in the PDF | `tests/test_parser_synthetic.py` |
+| version matcher, including refusal cases | `tests/test_matcher.py` |
+| ingestion, idempotency, revert, concurrent uploads | `tests/test_ingestion.py` |
+| browse and selection API | `tests/test_api.py` |
+| LLM transport errors | `tests/test_llm_client.py` |
+| malformed / ungrounded LLM output, duplicate policy | `tests/test_generation.py`, `tests/test_generation_api.py` |
+| staleness rules and real v1 → v2 → v3 history | `tests/test_staleness.py`, `tests/test_staleness_api.py` |
+
+## API
+
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/selections/{id}/generate?force=` | 201 new · 200 identical earlier result reused (no LLM call) · 502 failed (stored, inspectable) · 422 headings only |
-| GET | `/generations/{id}?include_raw=` | one generation with sources, test cases and every attempt |
-| GET | `/selections/{id}/generations` | all generations for a selection, newest first |
-
-Every test case cites `source_node_ids` and a `requirement_quote` that the validator checks
-word for word against the cited section. Prompt design, validation layers, retry and duplicate
-policies: [docs/llm_generation.md](docs/llm_generation.md).
-
-The test suite never calls a real LLM or MongoDB: it uses a scripted LLM, an in-memory store and
-`mongomock`, so `pytest` needs no keys or network.
-
-## Stage 5: staleness and retrieval
-
-Every response that contains a generation now includes `staleness` (computed at request time
-against the latest version) and, on each test case, `stale_status` / `stale_severity`.
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/generations/{id}` | one generation with its live verdict |
+| POST | `/documents/ingest?document=` | upload a PDF as the next version (201 new · 200 identical · 409 concurrent · 422 incomplete parse) |
+| GET | `/documents/versions`, `/documents/versions/{n}` | versions with diff summary and parse warnings |
+| GET | `/sections?version=` | top-level sections (latest by default) |
+| GET | `/tree?version=` | whole heading tree |
+| GET | `/nodes/{id}` | full text, blocks, content hash, flags, parent, path, children |
+| GET | `/nodes/{id}/changes` | changed since this version? history + word diff to latest |
+| GET | `/search?q=&field=&flag=&version=` | search titles/text; filter by flag (`duplicate_title`, `out_of_order`, …) |
+| POST | `/selections` | named, version-pinned selection (`include_descendants` for chapters) |
+| GET | `/selections`, `/selections/{id}` | with pinned text and status in the latest version |
+| POST | `/selections/{id}/generate?force=` | 201 new · 200 reused (no LLM call) · 502 failed (stored) · 422 headings only |
+| GET | `/generations/{id}?include_raw=` | test cases, sources, attempts, **staleness** |
 | GET | `/selections/{id}/generations?status=` | by selection; filter `current` / `review` / `stale` |
-| GET | `/nodes/{id}/generations?exact_version=&status=` | by section, across versions (the v2 node finds v1 test cases) |
+| GET | `/nodes/{id}/generations?exact_version=&status=` | by section across versions |
 
-Verdict per test case: **stale** if its quoted requirement is no longer in the current text,
-**review** if the section changed elsewhere, **current** if nothing it cites changed. Severity
-is **high** when a value it depends on changed (40 → 30 mmHg, 2 → 1.5 s), **medium** for wording,
-**low** for unrelated edits. Design and limits: [docs/staleness.md](docs/staleness.md).
+A **node id** identifies a section *in one version* and never changes meaning; the
+**logical_node_id** is shared by that section across versions.
 
-`python scripts/demo_flow.py` runs the whole flow and ends with the staleness of the v1 test
-cases after v2 is ingested.
-
-## Layout
+## Project layout
 
 ```
-app/parsing/     normalize, extract, classify, tree, parser
-app/db/          SQLAlchemy engine and models
-app/versioning/  cross-version matcher, word diff
-app/services/    ingestion, queries, selections (no HTTP code)
-app/llm/         LLM client (OpenAI-compatible, Groq default) + scripted test double
-app/generation/  prompt, reply validation, generation service
-app/storage/     generation store: MongoDB, JSON files, in-memory
-app/staleness/   per-test-case staleness against the latest version
-app/api/         FastAPI routes, schemas, converters; app/main.py wires them up
-scripts/         inspect_pdf, parse_cli, ocr_crosscheck, ingest, show_history, demo_flow, check_setup
-tests/           real-PDF tests + synthetic edge-case tests
-data/            ct200_manual.pdf (v1), ct200_manual_v2.pdf (v2)
-docs/            findings, versioning, approach document
+app/
+  parsing/     PDF -> lines -> headings/paragraphs/lists/tables -> tree (+ coverage check)
+  db/          SQLAlchemy models: documents, versions, logical nodes, node versions, selections
+  versioning/  cross-version matcher, word diff with changed numbers
+  services/    ingestion, queries, selections (no HTTP code)
+  llm/         OpenAI-compatible client (Groq default) + scripted test double
+  generation/  prompt, reply validation, generation service
+  storage/     generation store: MongoDB, JSON files, in-memory
+  staleness/   per-test-case staleness against the latest version
+  api/         FastAPI routes, schemas, converters;  app/main.py wires them up
+scripts/       inspect_pdf, parse_cli, ocr_crosscheck, ingest, show_history, check_setup, demo_flow
+tests/         125 tests
+data/          ct200_manual.pdf (v1), ct200_manual_v2.pdf (v2)
+docs/          APPROACH.md, pdf_findings.md, versioning.md, llm_generation.md, staleness.md
 ```
