@@ -22,9 +22,9 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="CT-200 QA Traceability API",
-    version="0.4.0",
+    version="0.5.0",
     description="Versioned section tree of the CT-200 manual, version-pinned selections, "
-                "and (next stages) LLM-generated test cases with staleness detection.",
+                "LLM-generated test cases, and staleness of those test cases against the latest version.",
     lifespan=lifespan,
 )
 

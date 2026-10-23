@@ -126,6 +126,8 @@ class SelectionOut(BaseModel):
 
 class GeneratedTestCase(BaseModel):
     id: str
+    stale_status: Optional[str] = Field(None, description="current | review | stale (vs. latest version)")
+    stale_severity: Optional[str] = Field(None, description="none | low | medium | high")
     title: str
     type: str
     priority: str
@@ -155,6 +157,43 @@ class GenerationAttempt(BaseModel):
     raw: Optional[str] = Field(None, description="raw LLM reply (include_raw=true)")
 
 
+class TestCaseStaleness(BaseModel):
+    id: str
+    title: str
+    status: str = Field(description="current | review | stale")
+    severity: str = Field(description="none | low | medium | high")
+    quote_still_present: Optional[bool]
+    reasons: List[str]
+
+
+class SourceStaleness(BaseModel):
+    node_id: int
+    logical_node_id: int
+    number: Optional[str]
+    title: str
+    status: str = Field(description="unchanged | changed | removed")
+    pinned_version: int
+    pinned_hash: str
+    latest_version: int
+    latest_node_id: Optional[int]
+    latest_hash: Optional[str]
+    latest_number: Optional[str]
+    latest_title: Optional[str]
+    diff: Optional[Dict[str, Any]]
+
+
+class Staleness(BaseModel):
+    status: str = Field(description="worst test-case status: current | review | stale")
+    severity: str = Field(description="worst severity: none | low | medium | high")
+    pinned_version: int
+    checked_against_version: int
+    checked_at: str
+    summary: str
+    test_case_counts: Dict[str, int]
+    sources: List[SourceStaleness]
+    test_cases: List[TestCaseStaleness]
+
+
 class GenerationOut(BaseModel):
     id: str
     status: str = Field(description="succeeded | failed")
@@ -174,3 +213,6 @@ class GenerationOut(BaseModel):
     sources: List[GenerationSource]
     test_cases: List[GeneratedTestCase]
     attempts: List[GenerationAttempt]
+    staleness: Optional[Staleness] = Field(None, description="computed now, against the latest version")
+    node_test_case_ids: Optional[List[str]] = Field(
+        None, description="GET /nodes/{id}/generations only: test cases that cite this section")
