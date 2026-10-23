@@ -116,3 +116,44 @@ class NodeVersion(Base):
     previous: Mapped[Optional[NodeVersion]] = relationship(
         remote_side="NodeVersion.id", foreign_keys=[previous_id]
     )
+
+
+class Selection(Base):
+    """A named set of sections, pinned to the exact NodeVersion rows chosen.
+
+    Because items reference NodeVersion ids (immutable rows), a selection made against v1
+    still resolves to v1 text after v2 is ingested. All items come from ONE document version:
+    a set of test cases should be generated from a coherent snapshot of the manual.
+    """
+
+    __tablename__ = "selections"
+    __table_args__ = (UniqueConstraint("document_id", "name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id"), index=True)
+    version_id: Mapped[int] = mapped_column(ForeignKey("document_versions.id"))
+    # sha256 over the sorted "node_version_id:content_hash" pairs: identifies the exact text set
+    fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    version: Mapped[DocumentVersion] = relationship()
+    items: Mapped[list[SelectionItem]] = relationship(
+        back_populates="selection", order_by="SelectionItem.position", cascade="all, delete-orphan"
+    )
+
+
+class SelectionItem(Base):
+    __tablename__ = "selection_items"
+    __table_args__ = (UniqueConstraint("selection_id", "node_version_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    selection_id: Mapped[int] = mapped_column(ForeignKey("selections.id"), index=True)
+    node_version_id: Mapped[int] = mapped_column(ForeignKey("node_versions.id"))
+    position: Mapped[int] = mapped_column(Integer)
+    # True if the user picked this node; False if it came in via include_descendants
+    explicit: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    selection: Mapped[Selection] = relationship(back_populates="items")
+    node: Mapped[NodeVersion] = relationship()

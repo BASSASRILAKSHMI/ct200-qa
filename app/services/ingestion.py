@@ -98,8 +98,11 @@ def ingest_pdf(
     pdf_path: str,
     document_name: str = config.DEFAULT_DOCUMENT_NAME,
     force_ocr: bool = False,
+    source_name: Optional[str] = None,
 ) -> IngestOutcome:
+    """source_name: original filename when pdf_path is a temporary upload."""
     sha = file_sha256(pdf_path)
+    source_name = source_name or os.path.basename(pdf_path)
 
     doc = session.scalars(select(Document).where(Document.name == document_name)).first()
     if doc is None:
@@ -115,7 +118,7 @@ def ingest_pdf(
     if result.unassigned_lines or result.duplicated_line_ids:
         session.rollback()
         raise IngestionError(
-            f"parser coverage check failed for {os.path.basename(pdf_path)}: "
+            f"parser coverage check failed for {source_name}: "
             f"{len(result.unassigned_lines)} unassigned and {len(result.duplicated_line_ids)} duplicated lines; "
             "refusing to store an incomplete tree. Details: " + "; ".join(result.warnings[:5])
         )
@@ -125,7 +128,7 @@ def ingest_pdf(
     version = DocumentVersion(
         document_id=doc.id,
         version_number=number,
-        source_filename=os.path.basename(pdf_path),
+        source_filename=source_name,
         file_sha256=sha,
         page_count=result.page_count,
         parse_warnings=result.warnings,
