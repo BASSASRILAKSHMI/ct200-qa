@@ -109,6 +109,11 @@ merged into one root `document` node.
 | 2 | 3.1 split into two paragraphs at a page break | Manual review of the `parse_cli.py` tree: the sentence ended exactly at the page bottom, so the "continue if unfinished sentence" rule broke it | Also continue when the last line on the page is a full-width (wrapped) line |
 | 3 | First chapter swallowed as the document title when a PDF has no separate title | Synthetic unit test (`test_duplicate_section_number...`) failed: `1. Intro` was the largest font on page 1 | A line that parses as a numbered heading is never treated as title |
 | 4 | Right-edge estimate collapsed on very small inputs | Synthetic page-break test failed with only two body lines | Percentile index rounds up |
+| 5 | Table text duplicated on PyMuPDF 1.26–1.28 (passed on 2.0, the version used to develop) | The word-coverage test failed on a second machine: "words in tree that are not in PDF". Reproduced by running the suite in separate virtualenvs per PyMuPDF version; those versions return extra 1-row "tables" nested inside the real ones | Keep only candidates with ≥2 rows and ≥2 columns that are not inside an accepted table; a line can belong to one table only; the parser now warns whenever any line is claimed by two elements. Suite verified on 1.26.7, 1.27.2.3, 1.28.2 and 2.0 |
+
+Lesson from #5: a third-party library's heuristics are part of the input. The parser must
+validate what the library returns rather than trust it, and a content-level invariant (every
+word exactly once) catches problems that hand-written expected values would miss.
 
 ### Validation methods used
 

@@ -109,9 +109,36 @@ def _center_in(line: Line, rect: pymupdf.Rect, tol: float = 1.0) -> bool:
     return rect.x0 - tol <= cx <= rect.x1 + tol and rect.y0 - tol <= cy <= rect.y1 + tol
 
 
+def _real_tables(found: list) -> list:
+    """Filter PyMuPDF table candidates down to real tables.
+
+    PyMuPDF 1.26-1.28 also returns small 1-row "tables" nested inside a real table (one per
+    cell row or cell fragment); 2.0 does not. Without this filter those fragments claim the
+    same lines a second time and content is duplicated (caught by the word-coverage test on
+    a machine with 1.28 installed). Rules: a table needs at least 2 rows and 2 columns, and a
+    candidate lying inside an already-accepted table is a fragment of it.
+    """
+    candidates = [t for t in found if t.row_count >= 2 and t.col_count >= 2]
+    candidates.sort(key=lambda t: -pymupdf.Rect(t.bbox).get_area())  # biggest first
+    kept: list = []
+    for t in candidates:
+        r = pymupdf.Rect(t.bbox)
+        if any(pymupdf.Rect(k.bbox).contains(r) or _overlap_ratio(r, pymupdf.Rect(k.bbox)) > 0.5 for k in kept):
+            continue
+        kept.append(t)
+    kept.sort(key=lambda t: t.bbox[1])
+    return kept
+
+
+def _overlap_ratio(a: pymupdf.Rect, b: pymupdf.Rect) -> float:
+    inter = pymupdf.Rect(a) & b
+    return 0.0 if inter.is_empty else inter.get_area() / max(a.get_area(), 1e-6)
+
+
 def _tables_for_page(page: pymupdf.Page, pno: int, lines: list[Line]) -> list[Table]:
     tables: list[Table] = []
-    for t in page.find_tables().tables:
+    claimed: set[int] = set()   # a line may belong to at most one table
+    for t in _real_tables(page.find_tables().tables):
         grid: list[list[str]] = []
         used: list[int] = []
         for row in t.rows:
@@ -122,7 +149,8 @@ def _tables_for_page(page: pymupdf.Page, pno: int, lines: list[Line]) -> list[Ta
                     continue
                 rect = pymupdf.Rect(cell)
                 inside = sorted(
-                    (l for l in lines if _center_in(l, rect)), key=lambda l: (l.y0, l.x0)
+                    (l for l in lines if l.id not in claimed and _center_in(l, rect)),
+                    key=lambda l: (l.y0, l.x0),
                 )
                 used.extend(l.id for l in inside)
                 cells_text.append(" ".join(l.text for l in inside))
@@ -130,7 +158,8 @@ def _tables_for_page(page: pymupdf.Page, pno: int, lines: list[Line]) -> list[Ta
         # Any line inside the table box is owned by the table, even if it fell between cells;
         # stray ones are reported by the coverage check instead of leaking into paragraphs.
         box = pymupdf.Rect(t.bbox)
-        owned = sorted({l.id for l in lines if _center_in(l, box)})
+        owned = sorted({l.id for l in lines if l.id not in claimed and _center_in(l, box)})
+        claimed.update(owned)
         tables.append(
             Table(
                 page=pno,

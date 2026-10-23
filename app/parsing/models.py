@@ -89,6 +89,7 @@ class ParseResult:
     nodes: dict[str, Node]                       # key -> node, insertion = document order
     warnings: list[str] = field(default_factory=list)
     unassigned_lines: list[Line] = field(default_factory=list)
+    duplicated_line_ids: list[int] = field(default_factory=list)  # lines claimed by >1 element
     ocr_pages: list[int] = field(default_factory=list)
 
     @property

@@ -95,6 +95,15 @@ def test_error_code_table_cells_are_exact(v1, v2):
     assert "E6" in rows2
 
 
+def test_each_table_section_has_exactly_one_table_and_no_line_is_claimed_twice(v1, v2):
+    # Regression: PyMuPDF 1.26-1.28 return extra 1-row "tables" nested inside real ones,
+    # which duplicated cell text. Found only when the suite ran on another machine.
+    for result in (v1, v2):
+        for num in ("2.1", "4.2"):
+            assert [b.kind for b in node(result, num).blocks] == ["table"], num
+        assert result.duplicated_line_ids == []
+
+
 def test_spec_table_values_are_exact(v1):
     table = node(v1, "2.1").blocks[0]
     values = dict(table.rows)

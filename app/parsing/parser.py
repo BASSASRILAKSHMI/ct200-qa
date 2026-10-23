@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from collections import Counter
+
 from .classify import classify
 from .extract import extract
 from .models import ParseResult, Table
@@ -16,10 +18,14 @@ def parse_pdf(pdf_path: str, force_ocr: bool = False) -> ParseResult:
     elements, consumed, _layout = classify(items, lines)
     nodes, warnings = build_tree(elements)
 
-    # Coverage check: every extracted line must belong to exactly one element.
+    # Coverage check: every extracted line must belong to EXACTLY one element.
     unassigned = [l for l in lines if l.id not in consumed]
     for l in unassigned:
         warnings.append(f"unassigned line on page {l.page}: {l.text!r}")
+    claims = Counter(lid for el in elements for lid in el.line_ids)
+    duplicated = sorted(lid for lid, n in claims.items() if n > 1)
+    for lid in duplicated:
+        warnings.append(f"line claimed by {claims[lid]} elements (content duplicated): {lines[lid].text!r}")
     for t in (it for it in items if isinstance(it, Table)):
         for lid in t.stray_line_ids:
             warnings.append(f"line inside table on page {t.page} not in any cell: {lines[lid].text!r}")
@@ -34,5 +40,6 @@ def parse_pdf(pdf_path: str, force_ocr: bool = False) -> ParseResult:
         nodes=nodes,
         warnings=warnings,
         unassigned_lines=unassigned,
+        duplicated_line_ids=duplicated,
         ocr_pages=ocr_pages,
     )
