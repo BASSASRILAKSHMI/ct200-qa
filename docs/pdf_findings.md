@@ -101,6 +101,43 @@ stay as body text. (They are useful cross-references; storing them is a future e
 The title wraps over three 22 pt lines. **Rule:** consecutive title-size lines on page 1 are
 merged into one root `document` node.
 
+## What the first implementation got wrong, and how each failure was found
+
+| # | Failure | How it was found | Fix |
+|---|---|---|---|
+| 1 | Table cells corrupted: `1 .5 seconds`, `0 –299 mmHg`, commas on their own line | Printed PyMuPDF `Table.extract()` output during development and compared it to the raw line dump | Use `find_tables()` only for cell geometry; fill cells from our own text lines |
+| 2 | 3.1 split into two paragraphs at a page break | Manual review of the `parse_cli.py` tree: the sentence ended exactly at the page bottom, so the "continue if unfinished sentence" rule broke it | Also continue when the last line on the page is a full-width (wrapped) line |
+| 3 | First chapter swallowed as the document title when a PDF has no separate title | Synthetic unit test (`test_duplicate_section_number...`) failed: `1. Intro` was the largest font on page 1 | A line that parses as a numbered heading is never treated as title |
+| 4 | Right-edge estimate collapsed on very small inputs | Synthetic page-break test failed with only two body lines | Percentile index rounds up |
+
+### Validation methods used
+
+1. **Raw layout dump** (`scripts/inspect_pdf.py`): every rule above traces back to a line in this dump.
+2. **Word-coverage test**: every word in the PDF's text layer must appear exactly once in the tree
+   (titles + numbers + bodies), and no word may appear that is not in the PDF. This catches
+   dropped, duplicated and invented content without hand-written expectations.
+3. **Independent OCR cross-check** (`scripts/ocr_crosscheck.py`): the OCR pipeline sees only
+   pixels and has no font weights, yet reproduces the identical hierarchy (27 sections in v1,
+   28 in v2, same titles, parents and flags). Agreement between two unrelated methods is strong
+   evidence the hierarchy is right.
+4. **Cross-version hash check**: sections whose text did not change must hash identically in
+   v1 and v2 even though their page positions, page breaks and hyphen encoding changed.
+
+### Why OCR is a fallback and not the primary source
+
+The cross-check shows what OCR would have introduced on this document:
+
+| Section | Text layer | OCR |
+|---|---|---|
+| 2.1 | `±3 mmHg` | `+3 mmHg` (wrong accuracy spec) |
+| 8.1 | `Class II` | `Class Il` |
+| 3.3 | `1. Normal:` | `akWD — . Normal:` (list numbering lost) |
+| 1.1, 2.2, 4.3 | `22–42`, `E1–E5` (en dash) | `22—42`, `22-32` (inconsistent dashes) |
+| 2.1, 4.2 | structured tables | flattened paragraphs (no cell geometry) |
+
+Every one of these would make an unchanged section look "changed" between versions, and the
+`±3` -> `+3` case silently corrupts a medical accuracy specification.
+
 ## v1 -> v2 content differences (seen during inspection; used later for versioning)
 
 | Section | Change |
