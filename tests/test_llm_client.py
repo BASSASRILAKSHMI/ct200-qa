@@ -78,3 +78,15 @@ def test_unreadable_200_is_retried():
 def test_missing_api_key_is_a_config_error():
     with pytest.raises(LLMConfigError, match="GROQ_API_KEY"):
         OpenAICompatibleClient(api_key="")
+
+
+def test_list_models_lets_setup_suggest_a_replacement_for_a_retired_model():
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "openai/gpt-oss-120b"}, {"id": "openai/gpt-oss-20b"}]})
+        return httpx.Response(404, json={"error": {"code": "model_not_found"}})
+
+    c = OpenAICompatibleClient(api_key="k", model="llama-3.3-70b-versatile", transport=httpx.MockTransport(handler))
+    with pytest.raises(LLMConfigError, match="404"):
+        c.complete([])                                    # retired model: no retries, clear error
+    assert c.list_models() == ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]

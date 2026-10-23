@@ -19,13 +19,24 @@ def check_llm() -> bool:
         print("  FAIL  no key: put GROQ_API_KEY=... in .env")
         return False
     print(f"        key found ({config.LLM_API_KEY[:4]}…, {len(config.LLM_API_KEY)} chars)")
+    client = OpenAICompatibleClient(max_retries=1)
     try:
-        r = OpenAICompatibleClient(max_retries=1).complete(
+        r = client.complete(
             [{"role": "user", "content": 'Reply with the JSON object {"ok": true} and nothing else.'}])
         print(f"  OK    replied in {r.latency_ms} ms: {r.text.strip()[:60]}")
         return True
     except LLMError as e:
         print(f"  FAIL  {e}")
+        if "model" in str(e).lower():
+            # providers retire models; show what this key can actually use
+            try:
+                models = [m for m in client.list_models() if "whisper" not in m and "guard" not in m]
+                print("        models available to this key:")
+                for m in models:
+                    print(f"          {m}")
+                print("        set LLM_MODEL=<one of these> in .env (openai/gpt-oss-120b is a good default)")
+            except LLMError as e2:
+                print(f"        could not list models: {e2}")
         return False
 
 

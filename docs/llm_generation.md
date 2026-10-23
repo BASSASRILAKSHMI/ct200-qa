@@ -26,6 +26,10 @@ selection (pinned node versions)
   limit, and safety behaviour, because that is where a home BP monitor's real risks are.
 * `PROMPT_VERSION = "tc-v1"` is stored on every result and is part of the duplicate key.
 * Temperature 0.2: the task rewards consistency, not creativity.
+* Model: `openai/gpt-oss-120b` on Groq by default, set by `LLM_MODEL`. The first choice,
+  `llama-3.3-70b-versatile`, was retired by Groq on 2026-08-16 and returned `model_not_found`
+  during setup. That is why the model is configuration, part of the duplicate key, and
+  `scripts/check_setup.py` lists the models a key can use when the configured one is refused.
 
 ## Validation (`app/generation/validate.py`)
 

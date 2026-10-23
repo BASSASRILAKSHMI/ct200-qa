@@ -125,6 +125,13 @@ class OpenAICompatibleClient:
 
         raise LLMUnavailable(f"LLM call failed after {self.max_retries + 1} attempts: {last_error}")
 
+    def list_models(self) -> list[str]:
+        """Model ids this key can use (GET /models). Used by scripts/check_setup.py."""
+        r = self._http.get("/models")
+        if r.status_code >= 400:
+            raise LLMConfigError(f"HTTP {r.status_code} listing models: {r.text[:200]}")
+        return sorted(m["id"] for m in r.json().get("data", []))
+
     def _backoff(self, attempt: int, retry_after: Optional[str]) -> None:
         if attempt >= self.max_retries:
             return

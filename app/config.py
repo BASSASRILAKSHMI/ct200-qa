@@ -27,7 +27,8 @@ DEFAULT_DOCUMENT_NAME = os.getenv("DEFAULT_DOCUMENT_NAME", "CT-200 Manual")
 # --- LLM (any OpenAI-compatible chat-completions endpoint; Groq by default) ---
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("GROQ_API_KEY", "")
-LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+# llama-3.3-70b-versatile was retired by Groq on 2026-08-16; gpt-oss-120b is their stated replacement
+LLM_MODEL = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 LLM_MAX_CONTENT_ATTEMPTS = int(os.getenv("LLM_MAX_CONTENT_ATTEMPTS", "3"))
