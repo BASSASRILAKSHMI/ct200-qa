@@ -31,6 +31,11 @@ def parse_pdf(pdf_path: str, force_ocr: bool = False) -> ParseResult:
             warnings.append(f"line inside table on page {t.page} not in any cell: {lines[lid].text!r}")
         if t.continued:
             warnings.append(f"table starting on page {t.page} continued onto the next page (merged)")
+    for el in elements:
+        blk = getattr(el, "block", None)
+        if blk is not None and blk.kind == "figure":
+            cap = f"caption {blk.text!r}" if blk.text else "no caption found"
+            warnings.append(f"figure on page {blk.page} kept as a figure block ({cap}); image content not extracted")
     if ocr_pages:
         warnings.append(f"OCR used for pages {ocr_pages}: no font weight, heading detection is text-only")
 

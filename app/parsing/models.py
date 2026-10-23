@@ -36,12 +36,24 @@ class Table:
 
 
 @dataclass
+class Figure:
+    """An image placed on a page. Its pixels are not interpreted; it is kept as a figure block
+    (position + caption) so it is never silently dropped."""
+
+    page: int
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+@dataclass
 class Block:
     """A content block inside a section."""
 
-    kind: Literal["paragraph", "list", "table"]
+    kind: Literal["paragraph", "list", "table", "figure"]
     page: int
-    text: str = ""                                    # paragraph text
+    text: str = ""                                    # paragraph text, or a figure's caption
     items: list[str] = field(default_factory=list)    # list items
     header: list[str] = field(default_factory=list)   # table header
     rows: list[list[str]] = field(default_factory=list)  # table rows
@@ -52,6 +64,10 @@ class Block:
             return self.text
         if self.kind == "list":
             return "\n".join(self.items)
+        if self.kind == "figure":
+            # the marker makes the figure part of the section's hash, so adding or removing
+            # an image (even an uncaptioned one) counts as a change
+            return f"[Figure] {self.text}".strip()
         lines = [" | ".join(self.header)] if self.header else []
         lines += [" | ".join(r) for r in self.rows]
         return "\n".join(lines)

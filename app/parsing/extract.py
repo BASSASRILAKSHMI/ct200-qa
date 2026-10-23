@@ -15,13 +15,24 @@ from typing import Union
 
 import pymupdf
 
-from .models import Line, Table
+from .models import Figure, Line, Table
 from .normalize import clean_display_text
 
-Item = Union[Line, Table]
+Item = Union[Line, Table, Figure]
 
 OCR_DPI = 300
 MIN_TEXT_CHARS = 20  # a page with fewer extractable characters is treated as scanned
+MIN_FIGURE_PT = 20   # images smaller than this (bullets, icons) are decoration, not figures
+
+
+def _figures_for_page(page: pymupdf.Page, pno: int) -> list[Figure]:
+    """Placed images on a text-layer page. (On an OCR'd page the whole page is an image.)"""
+    out = []
+    for info in page.get_image_info():
+        x0, y0, x1, y1 = info["bbox"]
+        if (x1 - x0) >= MIN_FIGURE_PT and (y1 - y0) >= MIN_FIGURE_PT:
+            out.append(Figure(page=pno, x0=x0, y0=y0, x1=x1, y1=y1))
+    return out
 
 
 def _is_bold(spans: list[dict]) -> bool:
@@ -44,7 +55,7 @@ def _text_layer_lines(page: pymupdf.Page, pno: int, start_id: int) -> list[Line]
     lines: list[Line] = []
     for block in page.get_text("dict")["blocks"]:
         if block["type"] != 0:
-            continue  # image block (none in CT-200, but do not crash on them)
+            continue  # images are handled separately as Figure items (_figures_for_page)
         for raw in block["lines"]:
             spans = [s for s in raw["spans"] if s["text"]]
             text = "".join(s["text"] for s in spans)
@@ -177,7 +188,8 @@ def _tables_for_page(page: pymupdf.Page, pno: int, lines: list[Line]) -> list[Ta
 def extract(pdf_path: str, force_ocr: bool = False) -> tuple[list[Item], list[Line], list[int], int]:
     """Return (ordered items, all lines, pages that used OCR, page count).
 
-    Items are Lines not inside a table, plus one Table item per table, in reading order
+    Items are Lines not inside a table, one Table item per table and one Figure item per placed
+    image, in reading order
     across ALL pages (one continuous stream, so page breaks do not split sections).
     """
     doc = pymupdf.open(pdf_path)
@@ -191,14 +203,17 @@ def extract(pdf_path: str, force_ocr: bool = False) -> tuple[list[Item], list[Li
             lines = _ocr_lines(page, pno, start)
             ocr_pages.append(pno)
             tables: list[Table] = []  # geometry-based table detection needs vector lines/text layer
+            figures: list[Figure] = []
         else:
             lines = _text_layer_lines(page, pno, start)
             tables = _tables_for_page(page, pno, lines)
+            figures = _figures_for_page(page, pno)
         all_lines.extend(lines)
 
         in_table = {lid for t in tables for lid in t.line_ids}
         page_items: list[tuple[float, Item]] = [(l.y0, l) for l in lines if l.id not in in_table]
         page_items += [(t.y0, t) for t in tables]
+        page_items += [(f.y0, f) for f in figures]
         page_items.sort(key=lambda p: p[0])
         items.extend(it for _, it in page_items)
 

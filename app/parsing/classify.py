@@ -14,10 +14,12 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Optional, Union
 
-from .models import Block, Line, Table
+from .models import Block, Figure, Line, Table
 
 HEADING_RE = re.compile(r"^(\d+(?:\.\d+)*)\.?\s+(\S.*)$")
 LIST_ITEM_RE = re.compile(r"^(?:\(?\d{1,2}[.)]|\(?[a-z][.)]|[•▪◦*\-–])\s+\S")
+CAPTION_RE = re.compile(r"^(fig(ure)?|image|diagram|illustration)\.?\s*\d", re.IGNORECASE)
+CAPTION_MAX_GAP = 40.0   # pt between the bottom of an image and its caption line
 SENTENCE_END_RE = re.compile(r"[.!?:]['\")\]]?$")
 
 MARGIN_TOL = 3.0   # pt: how far from the body margin a line may start and still be "at the margin"
@@ -99,7 +101,7 @@ def _is_heading(line: Line, lay: Layout) -> Optional[re.Match]:
     return None
 
 
-def classify(items: list[Union[Line, Table]], lines: list[Line]) -> tuple[list[Element], set[int], Layout]:
+def classify(items: list[Union[Line, Table, Figure]], lines: list[Line]) -> tuple[list[Element], set[int], Layout]:
     lay = learn_layout(lines)
     elements: list[Element] = []
     consumed: set[int] = set()
@@ -125,6 +127,22 @@ def classify(items: list[Union[Line, Table]], lines: list[Line]) -> tuple[list[E
             consumed.update(it.line_ids)
             prev_line = None
             i += 1
+            continue
+
+        # ---- figures: kept as blocks; a "Figure N ..." line just below is the caption ----
+        if isinstance(it, Figure):
+            close()
+            nxt = items[i + 1] if i + 1 < len(items) else None
+            caption_line = (
+                nxt if isinstance(nxt, Line) and nxt.page == it.page
+                and 0 <= nxt.y0 - it.y1 <= CAPTION_MAX_GAP and CAPTION_RE.match(nxt.text) else None
+            )
+            blk = Block(kind="figure", page=it.page, text=caption_line.text if caption_line else "")
+            elements.append(BlockEl(blk, [caption_line.id] if caption_line else []))
+            if caption_line:
+                consumed.add(caption_line.id)
+            prev_line = None
+            i += 2 if caption_line else 1
             continue
 
         line: Line = it
