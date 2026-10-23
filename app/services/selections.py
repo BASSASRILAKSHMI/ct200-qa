@@ -20,11 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import NodeVersion, Selection, SelectionItem
-from app.services.queries import BadRequest, NotFound, descendants_of, latest_version
-
-
-class Conflict(Exception):
-    pass
+from app.services.queries import BadRequest, Conflict, NotFound, descendants_of, latest_version
 
 
 def fingerprint(nodes: list[NodeVersion]) -> str:

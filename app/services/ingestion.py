@@ -20,12 +20,14 @@ from dataclasses import asdict, dataclass
 from typing import Optional
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app import config
 from app.db.models import Document, DocumentVersion, LogicalNode, NodeVersion
 from app.parsing.models import ParseResult
 from app.parsing.parser import parse_pdf
+from app.services.queries import Conflict
 from app.versioning.matcher import MatchResult, NodeRef, match_versions
 
 
@@ -94,6 +96,33 @@ def _summary(match: Optional[MatchResult], prev: Optional[DocumentVersion], old_
 
 
 def ingest_pdf(
+    session: Session,
+    pdf_path: str,
+    document_name: str = config.DEFAULT_DOCUMENT_NAME,
+    force_ocr: bool = False,
+    source_name: Optional[str] = None,
+) -> IngestOutcome:
+    """Ingest with a clear error when another ingestion of the same document wins a race.
+
+    Two uploads at the same moment both read "latest = N" and both try to write N + 1 (or both
+    create the document). The unique constraints stop the second one, so nothing is corrupted,
+    but without this wrapper the loser surfaced as an unexplained HTTP 500. Reproduced with two
+    threads; see tests/test_ingestion.py. Which upload wins is still decided by timing: callers
+    must not upload versions of one document in parallel (documented in docs/APPROACH.md).
+    """
+    try:
+        return _ingest(session, pdf_path, document_name, force_ocr, source_name)
+    except (IntegrityError, OperationalError) as e:
+        if isinstance(e, OperationalError) and "locked" not in str(e):
+            raise                                   # a real database problem, not a race
+        session.rollback()
+        raise Conflict(
+            f"another ingestion of {document_name!r} was written at the same time; nothing was stored "
+            f"for {source_name or os.path.basename(pdf_path)}. Retry the upload."
+        ) from e
+
+
+def _ingest(
     session: Session,
     pdf_path: str,
     document_name: str = config.DEFAULT_DOCUMENT_NAME,

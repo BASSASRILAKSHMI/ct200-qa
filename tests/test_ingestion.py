@@ -121,3 +121,42 @@ def test_word_diff_reports_threshold_changes(both):
     assert d["numbers_removed"] == ["2"] and "1.5" in d["numbers_added"]
     d = word_diff(nv(s, 1, "4.3").body, nv(s, 2, "4.3").body)
     assert d["numbers_removed"] == ["E5"] and d["numbers_added"] == ["E6"]
+
+
+def test_two_uploads_at_the_same_moment_never_crash_or_corrupt(tmp_path):
+    # Reproduces a race found while writing the decision log: both uploads read "no document
+    # yet" and both try to create it. Before the fix the loser was an unexplained HTTP 500.
+    import threading
+
+    from app.db.models import Document
+    from app.services.queries import Conflict
+
+    engine = make_engine(f"sqlite:///{tmp_path / 'race.db'}")
+    init_db(engine)
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    barrier, outcomes = threading.Barrier(2), {}
+
+    def upload(name, path):
+        s = Session()
+        barrier.wait()
+        try:
+            outcomes[name] = f"v{ingest_pdf(s, path).version.version_number}"
+        except Conflict:
+            outcomes[name] = "conflict"
+        except Exception as e:                       # anything else is the bug this test guards
+            outcomes[name] = f"crash: {type(e).__name__}"
+        finally:
+            s.close()
+
+    threads = [threading.Thread(target=upload, args=(n, p)) for n, p in (("a", V1), ("b", V2))]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+
+    assert len(outcomes) == 2, outcomes
+    assert set(outcomes.values()) <= {"v1", "v2", "conflict"}, outcomes   # nothing else escaped
+    assert "v1" in outcomes.values()
+    s = Session()
+    assert s.scalar(select(func.count()).select_from(Document)) == 1
+    numbers = sorted(s.scalars(select(DocumentVersion.version_number)))
+    assert numbers == list(range(1, len(numbers) + 1))                 # no gaps, no duplicates
+    engine.dispose()

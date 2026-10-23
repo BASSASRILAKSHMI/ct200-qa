@@ -20,6 +20,10 @@ class BadRequest(Exception):
     pass
 
 
+class Conflict(Exception):
+    """The request clashes with existing or concurrently written state (HTTP 409)."""
+
+
 # ---- documents and versions ---------------------------------------------------------------
 
 def get_document(session: Session, name: Optional[str] = None) -> Document:

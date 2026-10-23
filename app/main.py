@@ -10,8 +10,7 @@ from fastapi.responses import JSONResponse
 from app.api.routes import documents, generations, nodes, selections
 from app.db.base import init_db
 from app.services.ingestion import IngestionError
-from app.services.queries import BadRequest, NotFound
-from app.services.selections import Conflict
+from app.services.queries import BadRequest, Conflict, NotFound
 
 
 @asynccontextmanager
