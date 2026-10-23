@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api.routes import documents, nodes, selections
+from app.api.routes import documents, generations, nodes, selections
 from app.db.base import init_db
 from app.services.ingestion import IngestionError
 from app.services.queries import BadRequest, NotFound
@@ -22,7 +22,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="CT-200 QA Traceability API",
-    version="0.3.0",
+    version="0.4.0",
     description="Versioned section tree of the CT-200 manual, version-pinned selections, "
                 "and (next stages) LLM-generated test cases with staleness detection.",
     lifespan=lifespan,
@@ -31,6 +31,7 @@ app = FastAPI(
 app.include_router(documents.router)
 app.include_router(nodes.router)
 app.include_router(selections.router)
+app.include_router(generations.router)
 
 
 # Service-layer errors -> HTTP. Services never import FastAPI, so they stay reusable.

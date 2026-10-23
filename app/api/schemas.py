@@ -120,3 +120,57 @@ class SelectionOut(BaseModel):
     created_at: datetime
     items: List[SelectionItemOut]
     text: Optional[str] = Field(None, description="exact pinned text (include_text=true)")
+
+
+# ---- generation ---------------------------------------------------------------------------
+
+class GeneratedTestCase(BaseModel):
+    id: str
+    title: str
+    type: str
+    priority: str
+    source_node_ids: List[int]
+    requirement_quote: str
+    preconditions: List[str]
+    steps: List[str]
+    expected_result: str
+
+
+class GenerationSource(BaseModel):
+    node_id: int
+    logical_node_id: int
+    version: int
+    number: Optional[str]
+    title: str
+    content_hash: str
+
+
+class GenerationAttempt(BaseModel):
+    attempt: int
+    accepted: bool
+    finish_reason: Optional[str]
+    latency_ms: int
+    repaired: Optional[str]
+    errors: List[str]
+    raw: Optional[str] = Field(None, description="raw LLM reply (include_raw=true)")
+
+
+class GenerationOut(BaseModel):
+    id: str
+    status: str = Field(description="succeeded | failed")
+    reused: Optional[bool] = Field(None, description="POST only: true if an identical earlier result was returned")
+    selection_id: int
+    selection_name: str
+    pinned_version: int
+    prompt_version: str
+    provider: str
+    model: str
+    forced: bool
+    supersedes: Optional[str]
+    created_at: str
+    failure_reason: Optional[str]
+    failure_detail: Optional[str]
+    warnings: List[str]
+    sources: List[GenerationSource]
+    test_cases: List[GeneratedTestCase]
+    attempts: List[GenerationAttempt]

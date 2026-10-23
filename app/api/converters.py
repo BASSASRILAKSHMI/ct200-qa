@@ -1,6 +1,8 @@
 """ORM rows -> response models."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
 from app.db.models import DocumentVersion, NodeVersion, Selection
@@ -10,6 +12,11 @@ from app.services.selections import latest_status, selection_text
 from .schemas import NodeDetail, NodeSummary, SelectionItemOut, SelectionOut, TreeNode, VersionOut
 
 
+def utc(dt: datetime) -> datetime:
+    """SQLite drops tzinfo on read; values are written in UTC, so label them as UTC."""
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
 def version_out(v: DocumentVersion) -> VersionOut:
     return VersionOut(
         version=v.version_number,
@@ -17,7 +24,7 @@ def version_out(v: DocumentVersion) -> VersionOut:
         file_sha256=v.file_sha256,
         page_count=v.page_count,
         node_count=len(v.nodes),
-        ingested_at=v.ingested_at,
+        ingested_at=utc(v.ingested_at),
         diff_summary=v.diff_summary or {},
         parse_warnings=v.parse_warnings or [],
     )
@@ -69,7 +76,7 @@ def selection_out(session: Session, sel: Selection, include_text: bool = False) 
         pinned_version=status["pinned_version"],
         latest_version=status["latest_version"],
         fingerprint=sel.fingerprint,
-        created_at=sel.created_at,
+        created_at=utc(sel.created_at),
         items=[
             SelectionItemOut(
                 node_id=i.node.id,
