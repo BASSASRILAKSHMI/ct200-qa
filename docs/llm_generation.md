@@ -52,9 +52,10 @@ repaired: no dropping the one bad case to keep four good ones, no trimming 6 cas
 re-mapping an unknown node id. Extra fields the model adds (`id`, `confidence`) are ignored,
 because they cannot make a result wrong and rejecting them would only burn retries.
 
-**Warnings, not errors.** If an explicitly selected section with text is not cited by any test
-case, the result is accepted with a warning. 3–5 cases cannot always cover 6 sections, and
-rejecting would loop.
+**Warnings, not errors.** Two checks warn instead of rejecting: a selected section that no test
+case cites (3–5 cases cannot always cover 6 sections, and rejecting would loop), and
+`unverified_values`, i.e. numbers in an expected result that the cited text never states (see
+Known limitations).
 
 ## Failure handling
 
@@ -114,9 +115,12 @@ change, so the record always points at exactly the text it was generated from.
 ## Known limitations
 
 * The quote check proves a test is **anchored** to real text, not that its steps and expected
-  result are correct. A model can quote "E3 … within 2 seconds" and still write a wrong expected
-  result. A second check (numbers in `expected_result` must appear in the cited text) is the
-  obvious next step.
+  result are correct. This happened on the first real Groq run: a test quoting "40 mmHg
+  increments up to a maximum of 299 mmHg" expected the cuff to reach "220, 260, then 300 mmHg",
+  and 300 contradicts the manual. Since then every test case carries `unverified_values` (numbers
+  or codes in `expected_result` that its cited sections never state), plus a warning on the
+  generation. It warns rather than rejects because derived values (180 + 40 = 220) can be
+  legitimate; a human decides.
 * No chunking: a very large selection could exceed the model's context. The CT-200 manual is far
   below any limit.
 * The JSON-file store scans every file on `find()`. Fine for hundreds of records, not thousands.

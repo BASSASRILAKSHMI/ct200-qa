@@ -20,6 +20,7 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.parsing.normalize import normalize_text
+from app.versioning.diff import numbers_in
 
 from .prompt import MAX_CASES, MIN_CASES
 
@@ -67,6 +68,34 @@ def _canon(text: str) -> str:
     t = t.replace("–", "-").replace("—", "-").replace("−", "-")
     t = t.replace("|", " ")      # table rows are stored "E3 | Overpressure | ..."; quotes may span cells
     return re.sub(r"\s+", " ", t).strip(" .")
+
+
+def _bare_values(text: str) -> set[str]:
+    """Numbers/codes in text, reduced to bare values: '±3' -> '3', '15%' -> '15',
+    '22–42' -> {'22', '42'}, 'E3' stays 'E3'."""
+    out: set[str] = set()
+    for tok in numbers_in(text):
+        tok = tok.lstrip("±<>≥≤").rstrip("%")
+        for part in re.split(r"[–-]", tok):
+            if part:
+                out.add(part)
+    return out
+
+
+def unverified_values(expected_result: str, cited_text: str) -> list[str]:
+    """Values the expected result asserts that the cited sections never state.
+
+    Found on real output: a test anchored to "40 mmHg increments up to a maximum of 299 mmHg"
+    expected the cuff to reach "220, 260, then 300 mmHg". The quote was genuine, so grounding
+    passed, but 300 contradicts the manual. Derived values (180 + 40 = 220) can be legitimate,
+    so this is a WARNING for a human reviewer, not a rejection.
+    """
+    allowed = _bare_values(cited_text)
+    seen: list[str] = []
+    for v in sorted(_bare_values(expected_result), key=lambda x: (len(x), x)):
+        if v not in allowed and v not in seen:
+            seen.append(v)
+    return seen
 
 
 def validate_reply(text: str, finish_reason: Optional[str], sections: list[dict]) -> ValidationOutcome:
@@ -128,6 +157,16 @@ def validate_reply(text: str, finish_reason: Optional[str], sections: list[dict]
         return ValidationOutcome(False, errors=errors, repaired=repaired)
 
     warnings = []
+    dumped = []
+    for i, tc in enumerate(cases, start=1):
+        d = tc.model_dump()
+        text = " ".join(f"{by_id[n]['title']} {by_id[n]['body']}" for n in tc.source_node_ids)
+        d["unverified_values"] = unverified_values(tc.expected_result, text)
+        if d["unverified_values"]:
+            warnings.append(f"test case {i} expected result states value(s) not found in its cited "
+                            f"section(s): {', '.join(d['unverified_values'])} (check before use)")
+        dumped.append(d)
+
     cited = {n for tc in cases for n in tc.source_node_ids}
     for s in sections:
         if s.get("explicit", True) and s["body"].strip() and s["node_id"] not in cited:
@@ -135,7 +174,7 @@ def validate_reply(text: str, finish_reason: Optional[str], sections: list[dict]
 
     return ValidationOutcome(
         True,
-        test_cases=[tc.model_dump() for tc in cases],
+        test_cases=dumped,
         warnings=warnings,
         repaired=repaired,
     )

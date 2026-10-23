@@ -253,3 +253,19 @@ def test_works_identically_with_the_mongodb_store(db, selection):
     assert store.find(node_id=node(db, "4.2").id)[0]["_id"] == doc["_id"]
     _, reused, *_ = run(db, selection, [], store=store)
     assert reused is True
+
+
+def test_values_the_manual_never_states_are_flagged_on_real_groq_output(db, selection):
+    # Verbatim from the first real Groq run: the quote is genuine (so grounding passes), but the
+    # expected result asserts 220/260/300 mmHg; 300 even contradicts the 299 mmHg maximum.
+    a = node(db, "3.2").id
+    cases = json.loads(good_reply(db))["test_cases"]
+    cases[1] = case("Verify incremental inflation to max 299 mmHg and abort when pulse not detected", [a],
+                    "inflates in 40 mmHg increments up to a maximum of 299 mmHg before aborting with an error",
+                    expected_result="Cuff inflates to 220, 260, then 300 mmHg (capped at 299 mmHg) and the "
+                                    "device aborts measurement displaying an error code")
+    doc, *_ = run(db, selection, [json.dumps({"test_cases": cases})])
+    assert doc["status"] == "succeeded"                                  # a warning, not a rejection
+    assert doc["test_cases"][1]["unverified_values"] == ["220", "260", "300"]
+    assert doc["test_cases"][0]["unverified_values"] == []
+    assert any("test case 2" in w and "220, 260, 300" in w for w in doc["warnings"])

@@ -136,6 +136,8 @@ class GeneratedTestCase(BaseModel):
     preconditions: List[str]
     steps: List[str]
     expected_result: str
+    unverified_values: List[str] = Field(
+        default_factory=list, description="values in expected_result that the cited sections do not state")
 
 
 class GenerationSource(BaseModel):
