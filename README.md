@@ -91,8 +91,9 @@ curl -X POST http://127.0.0.1:8000/selections/1/generate
 curl "http://127.0.0.1:8000/selections/1/generations"               # staleness block per generation
 ```
 
-To see staleness appear, generate from v1 **before** ingesting v2 (as the demo does). Or use the
-command-line tools:
+Node 11 is v1's 3.2, so the selection is pinned to v1 text and its test cases are judged against
+v2 immediately: the generate response and every retrieval already carry the staleness verdict.
+Without the API, the same versioning flow runs from the command line:
 
 ```bash
 python scripts/ingest.py data/ct200_manual.pdf data/ct200_manual_v2.pdf --reset
