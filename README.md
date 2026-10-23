@@ -4,8 +4,8 @@ Turns the CardioTrack CT-200 manual (PDF) into a structured, versioned document 
 generates QA test-case ideas from selected sections with an LLM, and detects when those
 test cases go stale after the manual changes.
 
-> Built in stages. Done: Stage 1 (PDF parsing), Stage 2 (database and versioning).
-> Next: browse/selection API, LLM generation, staleness.
+> Built in stages. Done: Stage 1 (PDF parsing), Stage 2 (database and versioning),
+> Stage 3 (browse and selection API). Next: LLM generation, staleness.
 
 ## Setup
 
@@ -58,14 +58,64 @@ Expected v1 -> v2 result: 24 unchanged, 4 modified (2.1.1.1, 3.2, 4.2, 4.3), 1 a
 Re-running the v2 ingest is a no-op. The database is `ct200.db` (set `DATABASE_URL` to change).
 Matching strategy and its failure modes: [docs/versioning.md](docs/versioning.md).
 
+## Stage 3: the API
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Open **http://127.0.0.1:8000/docs** for interactive Swagger UI (every endpoint can be tried
+from the browser). Then, in a second terminal, the scripted end-to-end flow:
+
+```bash
+python scripts/demo_flow.py
+```
+
+It uploads v1, pins a selection of 3.2 + 4.2, uploads v2, and shows that the selection still
+resolves to v1 text, that both sections changed, and exactly what changed (`40 -> 30` mmHg,
+`2 -> 1.5` seconds, `E6` added). Each run uses its own document name, so it is repeatable.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/documents/ingest` | upload a PDF as the next version (201 new, 200 identical, 422 incomplete parse) |
+| GET | `/documents/versions`, `/documents/versions/{n}` | versions with diff summary and parse warnings |
+| GET | `/sections?version=` | top-level sections (latest by default) |
+| GET | `/tree?version=` | whole heading tree |
+| GET | `/nodes/{id}` | node with full text, blocks, hash, flags, parent, path, children |
+| GET | `/nodes/{id}/changes` | changed since this version? history + word diff to latest |
+| GET | `/search?q=&field=&flag=&version=` | search titles/text, filter by flag (e.g. `duplicate_title`) |
+| POST | `/selections` | named, version-pinned selection (`include_descendants` for chapters) |
+| GET | `/selections`, `/selections/{id}` | selections with pinned text and status in latest version |
+
+All browse endpoints also take `document=` (default `CT-200 Manual`).
+
+IDs: a **node id** identifies one section *in one version* and never changes meaning; the
+**logical_node_id** is shared by that section across versions.
+
+curl examples (on Windows PowerShell type `curl.exe`, not `curl`):
+
+```bash
+curl -F "file=@data/ct200_manual.pdf" http://127.0.0.1:8000/documents/ingest
+curl -F "file=@data/ct200_manual_v2.pdf" http://127.0.0.1:8000/documents/ingest
+curl "http://127.0.0.1:8000/sections?version=1"
+curl "http://127.0.0.1:8000/search?q=error%20codes&field=title"
+curl "http://127.0.0.1:8000/search?flag=out_of_order"
+curl http://127.0.0.1:8000/nodes/11/changes
+curl -H "Content-Type: application/json" -d "{\"name\":\"inflation\",\"node_ids\":[11,16]}" http://127.0.0.1:8000/selections
+```
+
+Selection rules: all nodes from one version (422 otherwise), unknown ids 404, name reused 409,
+order normalised to document order, duplicates collapsed.
+
 ## Layout
 
 ```
 app/parsing/     normalize, extract, classify, tree, parser
 app/db/          SQLAlchemy engine and models
 app/versioning/  cross-version matcher, word diff
-app/services/    ingestion
-scripts/         inspect_pdf, parse_cli, ocr_crosscheck, ingest, show_history
+app/services/    ingestion, queries, selections (no HTTP code)
+app/api/         FastAPI routes, schemas, converters; app/main.py wires them up
+scripts/         inspect_pdf, parse_cli, ocr_crosscheck, ingest, show_history, demo_flow
 tests/           real-PDF tests + synthetic edge-case tests
 data/            ct200_manual.pdf (v1), ct200_manual_v2.pdf (v2)
 docs/            findings, versioning, approach document
