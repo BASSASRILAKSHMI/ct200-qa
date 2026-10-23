@@ -9,7 +9,7 @@ test cases go stale after the manual changes.
 
 ## Setup
 
-Requires Python 3.11+ and, for the OCR fallback/cross-check only, the Tesseract binary
+Requires Python 3.10+ and, for the OCR fallback/cross-check only, the Tesseract binary
 (`sudo apt install tesseract-ocr`, or the Windows installer from UB Mannheim).
 
 ```bash

@@ -6,3 +6,6 @@ pillow>=10.0
 
 # Testing
 pytest>=8.0
+
+# Database
+sqlalchemy>=2.0
