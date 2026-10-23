@@ -3,8 +3,11 @@
     uvicorn app.main:app                  # terminal 1
     python scripts/demo_flow.py           # terminal 2
 
-Flow: upload v1 -> select 3.2 + 4.2 from v1 -> upload v2 -> show that the selection still
-resolves to v1 text, that both sections changed, and exactly what changed.
+Flow: upload v1 -> select 3.2 + 4.2 from v1 -> generate test cases (LLM) -> submit again
+(stored result reused, no LLM call) -> upload v2 -> show that the selection still resolves
+to v1 text, that both sections changed, and exactly what changed.
+Without GROQ_API_KEY in .env the generation step reports the configuration error and the
+rest of the flow still runs.
 Each run uses its own document name, so it can be repeated without resetting the database.
 """
 import argparse
@@ -66,20 +69,49 @@ def main() -> None:
         print(f"  selection {sel['id']} pinned to v{sel['pinned_version']}, nodes {ids}")
         print(f"  fingerprint {sel['fingerprint'][:16]}…")
 
-        step("3. Upload v2 of the manual")
+        step("3. Generate QA test cases from the pinned v1 text (LLM)")
+        r = c.post(f"/selections/{sel['id']}/generate")
+        gen = r.json()
+        if r.status_code == 201:
+            print(f"  generation {gen['id'][:12]}… by {gen['provider']}/{gen['model']}, "
+                  f"{len(gen['attempts'])} attempt(s)")
+            for a in gen["attempts"]:
+                if not a["accepted"]:
+                    print(f"    attempt {a['attempt']} rejected: {a['errors'][:2]}")
+            for tc in gen["test_cases"]:
+                print(f"  {tc['id']} [{tc['type']}/{tc['priority']}] {tc['title']}")
+                print(f"        source nodes {tc['source_node_ids']}, quote: \"{tc['requirement_quote'][:70]}\"")
+            for w in gen["warnings"]:
+                print(f"  warning: {w}")
+        elif r.status_code == 502:
+            print(f"  generation stored as FAILED ({gen['failure_reason']}): {gen['failure_detail'][:160]}")
+            if gen["failure_reason"] == "llm_config_error":
+                print("  -> put GROQ_API_KEY in .env and restart the server; continuing without test cases")
+        else:
+            check(r, 201)
+
+        step("4. Submit the same selection again: duplicate policy")
+        r2 = c.post(f"/selections/{sel['id']}/generate")
+        if r.status_code == 201:
+            print(f"  HTTP {r2.status_code}, reused={r2.json()['reused']}, same id: {r2.json()['id'] == gen['id']} "
+                  "(stored result returned, LLM not called)")
+        else:
+            print(f"  HTTP {r2.status_code}: failed generations are never reused, so the LLM was tried again")
+
+        step("5. Upload v2 of the manual")
         v2 = upload(c, V2, doc)["version"]
         s = v2["diff_summary"]
         print(f"  version {v2['version']} vs {s['previous_version']}: {s['counts']}")
         print(f"  modified: {s['modified']}   added: {s['added']}")
 
-        step("4. Re-read the selection: still pinned to v1 text")
+        step("6. Re-read the selection: still pinned to v1 text")
         again = check(c.get(f"/selections/{sel['id']}"), 200)
         assert again["fingerprint"] == sel["fingerprint"], "pinned text changed!"
         for item in again["items"]:
             print(f"  {item['number']:5} {item['title']:28} status in latest: {item['status_in_latest']}")
         print("  pinned text still says '40 mmHg increments':", "40 mmHg increments" in again["text"])
 
-        step("5. What changed in each pinned section (diff to latest)")
+        step("7. What changed in each pinned section (diff to latest)")
         for node in ids:
             r = check(c.get(f"/nodes/{node}/changes"), 200)
             d = r["diff_to_latest"]
@@ -89,7 +121,7 @@ def main() -> None:
             for ch in d["changes"]:
                 print(f"    {ch['op']:8} '{ch['old'][:50]}' -> '{ch['new'][:70]}'")
 
-        step("6. Re-uploading v2 is a no-op")
+        step("8. Re-uploading v2 is a no-op")
         with open(V2, "rb") as f:
             r = c.post("/documents/ingest", files={"file": ("ct200_manual_v2.pdf", f, "application/pdf")},
                        params={"document": doc})

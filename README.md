@@ -5,7 +5,7 @@ generates QA test-case ideas from selected sections with an LLM, and detects whe
 test cases go stale after the manual changes.
 
 > Built in stages. Done: Stage 1 (PDF parsing), Stage 2 (database and versioning),
-> Stage 3 (browse and selection API). Next: LLM generation, staleness.
+> Stage 3 (browse and selection API), Stage 4 (LLM test-case generation). Next: staleness.
 
 ## Setup
 
@@ -107,6 +107,45 @@ curl -H "Content-Type: application/json" -d "{\"name\":\"inflation\",\"node_ids\
 Selection rules: all nodes from one version (422 otherwise), unknown ids 404, name reused 409,
 order normalised to document order, duplicates collapsed.
 
+## Stage 4: LLM test-case generation
+
+### Configure (once)
+
+```bash
+cp .env.example .env          # Windows: copy .env.example .env
+```
+
+Edit `.env`:
+* `GROQ_API_KEY=` your key from https://console.groq.com (API Keys)
+* `MONGODB_URI=` your Atlas connection string (Connect → Drivers), or leave empty to store
+  results as JSON files in `./generation_store`
+
+`.env` is git-ignored. Then check it:
+
+```bash
+python scripts/check_setup.py
+```
+
+### Use
+
+```bash
+uvicorn app.main:app --reload
+python scripts/demo_flow.py          # now also generates, and shows the duplicate policy
+```
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/selections/{id}/generate?force=` | 201 new · 200 identical earlier result reused (no LLM call) · 502 failed (stored, inspectable) · 422 headings only |
+| GET | `/generations/{id}?include_raw=` | one generation with sources, test cases and every attempt |
+| GET | `/selections/{id}/generations` | all generations for a selection, newest first |
+
+Every test case cites `source_node_ids` and a `requirement_quote` that the validator checks
+word for word against the cited section. Prompt design, validation layers, retry and duplicate
+policies: [docs/llm_generation.md](docs/llm_generation.md).
+
+The test suite never calls a real LLM or MongoDB: it uses a scripted LLM, an in-memory store and
+`mongomock`, so `pytest` needs no keys or network.
+
 ## Layout
 
 ```
@@ -114,8 +153,11 @@ app/parsing/     normalize, extract, classify, tree, parser
 app/db/          SQLAlchemy engine and models
 app/versioning/  cross-version matcher, word diff
 app/services/    ingestion, queries, selections (no HTTP code)
+app/llm/         LLM client (OpenAI-compatible, Groq default) + scripted test double
+app/generation/  prompt, reply validation, generation service
+app/storage/     generation store: MongoDB, JSON files, in-memory
 app/api/         FastAPI routes, schemas, converters; app/main.py wires them up
-scripts/         inspect_pdf, parse_cli, ocr_crosscheck, ingest, show_history, demo_flow
+scripts/         inspect_pdf, parse_cli, ocr_crosscheck, ingest, show_history, demo_flow, check_setup
 tests/           real-PDF tests + synthetic edge-case tests
 data/            ct200_manual.pdf (v1), ct200_manual_v2.pdf (v2)
 docs/            findings, versioning, approach document
