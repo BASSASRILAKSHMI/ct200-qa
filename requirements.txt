@@ -1,0 +1,8 @@
+# PDF parsing
+pymupdf>=1.24
+# OCR fallback / cross-check (also needs the Tesseract binary installed on the system)
+pytesseract>=0.3.10
+pillow>=10.0
+
+# Testing
+pytest>=8.0
