@@ -33,7 +33,7 @@ def check(resp: httpx.Response, expected: int) -> dict:
 def upload(c: httpx.Client, path: str, doc: str) -> dict:
     with open(path, "rb") as f:
         return check(c.post("/documents/ingest", files={"file": (os.path.basename(path), f, "application/pdf")},
-                            data={"document": doc}), 201)
+                            params={"document": doc}), 201)
 
 
 def find(c: httpx.Client, number: str, version: int, doc: str) -> int:
@@ -92,7 +92,7 @@ def main() -> None:
         step("6. Re-uploading v2 is a no-op")
         with open(V2, "rb") as f:
             r = c.post("/documents/ingest", files={"file": ("ct200_manual_v2.pdf", f, "application/pdf")},
-                       data={"document": doc})
+                       params={"document": doc})
         print(f"  HTTP {r.status_code}, created={r.json()['created']}")
 
     print("\nDone. Browse interactively at", args.base_url + "/docs")

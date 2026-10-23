@@ -3,7 +3,7 @@ import shutil
 import tempfile
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app import config
@@ -30,7 +30,9 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 def ingest(
     response: Response,
     file: UploadFile = File(...),
-    document: Optional[str] = Form(None),
+    # A query parameter, not a form field: Swagger UI pre-fills optional form fields with the
+    # placeholder "string", which silently created a document named "string" during testing.
+    document: Optional[str] = Query(None, description="document name; defaults to the CT-200 manual"),
     session: Session = Depends(get_session),
 ) -> IngestOut:
     if not (file.filename or "").lower().endswith(".pdf"):

@@ -50,6 +50,19 @@ def test_reuploading_identical_pdf_returns_200_not_a_new_version(client):
     assert [v["version"] for v in client.get("/documents/versions").json()] == [1, 2]
 
 
+def test_document_name_is_a_query_parameter_and_isolated(client):
+    # Regression: as a form field, Swagger UI pre-filled it with "string" and created a
+    # document literally named "string". Now it is a query parameter.
+    with open(V1, "rb") as f:
+        r = client.post("/documents/ingest", params={"document": "other manual"},
+                        files={"file": ("ct200_manual.pdf", f, "application/pdf")})
+    assert r.status_code == 201 and r.json()["version"]["version"] == 1
+    assert [v["version"] for v in client.get("/documents/versions", params={"document": "other manual"}).json()] == [1]
+    assert [v["version"] for v in client.get("/documents/versions").json()] == [1, 2]   # default untouched
+    schema = client.get("/openapi.json").json()["paths"]["/documents/ingest"]["post"]
+    assert any(p["name"] == "document" and p["in"] == "query" for p in schema["parameters"])
+
+
 def test_non_pdf_upload_is_rejected(client):
     r = client.post("/documents/ingest", files={"file": ("notes.txt", b"hello", "text/plain")})
     assert r.status_code == 422
